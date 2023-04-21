@@ -1,6 +1,21 @@
 SELF = $(lastword $(MAKEFILE_LIST))
 ROOT_DIR = $(realpath $(dir $(SELF)))
 
+
+
+# Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
+ifeq (,$(shell $(GO_CMD) env GOBIN))
+GOBIN=$(shell $(GO_CMD) env GOPATH)/bin
+else
+GOBIN=$(shell $(GO_CMD) env GOBIN)
+endif
+
+# Get current GOARCH
+GOARCH?=$(shell $(GO_CMD) env GOARCH)
+
+# Local (alternative) GOBIN for auxiliary build tools
+GOBIN_ALT:=$(CURDIR)/.bin
+
 CONTAINER_CMD ?=
 ifeq ($(CONTAINER_CMD),)
 	CONTAINER_CMD:=$(shell podman version >/dev/null 2>&1 && echo podman)
@@ -19,8 +34,22 @@ $(warning podman detected but 'podman version' failed. \
 endif
 endif
 
+
+# Helper function to re-format yamls using helper script
+define yamls_reformat
+	YQ=$(YQ) $(CURDIR)/hack/yq-fixup-yamls.sh $(1)
+endef
+
+
+define installtool
+	@GOBIN=$(ALT_BIN) GO_CMD=$(GO_CMD) $(CURDIR)/hack/install-tools.sh $(1)
+endef
+
+GO_CMD=go
 BUILD_CMD:=$(CONTAINER_CMD) build $(BUILD_OPTS)
 PUSH_CMD:=$(CONTAINER_CMD) push $(PUSH_OPTS)
+SHELLCHECK:=shellcheck
+YAMLLINT_CMD=yamllint
 
 ALT_BIN=$(CURDIR)/.bin
 SHELLCHECK=$(shell command -v shellcheck || echo $(ALT_BIN)/shellcheck)
@@ -132,6 +161,31 @@ debug-vars:
 	@echo CLIENT_SERVER_SRC_FILE: $(CLIENT_SRC_FILE)
 	@echo TOOLBOX_SRC_FILE: $(TOOLBOX_SRC_FILE)
 
+
+
+yq:
+ifeq (, $(shell command -v yq ;))
+	@echo "yq not found in PATH, checking $(GOBIN_ALT)"
+ifeq (, $(shell command -v $(GOBIN_ALT)/yq ;))
+	@$(call installtool, --yq)
+	@echo "yq installed in $(GOBIN_ALT)"
+endif
+YQ=$(GOBIN_ALT)/yq
+else
+YQ=$(shell command -v yq ;)
+endif
+gitlint:
+.PHONY: gitlint
+ifeq (, $(shell command -v gitlint ;))
+	@echo "gitlint not found in PATH, checking $(ALT_BIN)"
+ifeq (, $(shell command -v $(ALT_BIN)/gitlint ;))
+	@$(call installtool, --gitlint)
+	@echo "gitlint installed in $(ALT_BIN)"
+endif
+GITLINT=$(ALT_BIN)/gitlint
+else
+GITLINT=$(shell command -v gitlint ;)
+endif
 
 ### Image Build and Push Rules ###
 
@@ -248,8 +302,18 @@ test-nightly-server: build-nightly-server
 
 ### Check Rules: static checks, quality tools ###
 
-check: check-shell-scripts
-.PHONY: check
+check: check-shell-scripts check-yaml
+.PHONY: check check-shell-scripts check-yaml
+check-yaml:
+	$(YAMLLINT_CMD) -c ./.yamllint.yaml ./
+
+
+# Format yaml files for yamllint standard
+.PHONY: yaml-fmt
+yaml-fmt: yq
+	$(call yamls_reformat, $(CURDIR))
+
+
 
 # rule requires shellcheck and find to run
 check-shell-scripts: $(filter $(ALT_BIN)%,$(SHELLCHECK))
@@ -257,9 +321,9 @@ check-shell-scripts: $(filter $(ALT_BIN)%,$(SHELLCHECK))
 .PHONY: check-shell-scripts
 
 # not included in check to not disrupt wip branches
-check-gitlint: $(filter $(ALT_BIN)%,$(GITLINT))
+check-gitlint: gitlint $(filter $(ALT_BIN)%,$(GITLINT))
 	$(GITLINT) -C .gitlint --commits origin/master.. lint
-.PHONY: check-gitlint
+.PHONY: check-gitlint 
 
 ### Mics. Rules ###
 

@@ -1,78 +1,119 @@
-#!/bin/bash
+#!/bin/sh
 # helper script to install build auxiliary tools in local directory
 #
 # usage:
-#   install-tools.sh --<tool-name> <alt_bin>
-#
+#   GOBIN=<dir> install-tools.sh --<tool-name>
 #
 set -e
 
-_ensure_alt_bin() {
-	mkdir -p "${ALT_BIN}"
+_require_gobin() {
+	mkdir -p "${GOBIN}"
+}
+
+_require_go() {
+	if [ -z "$GO_CMD" ]; then
+		echo "error: go command required, but not found" >&2
+		echo "(set GO_CMD to specify go command)" >&2
+		exit 5
+	fi
 }
 
 _require_py() {
-    if [ -z "$PY_CMD" ]; then
-        echo "error: python3 command required, but not found" >&2
-        echo "(set PY_CMD to specify python command)" >&2
-        exit 5
-    fi
+	if [ -z "$PY_CMD" ]; then
+		echo "error: python3 command required, but not found" >&2
+		echo "(set PY_CMD to specify python command)" >&2
+		exit 5
+	fi
+}
+
+_install_tool() {
+	_require_go
+	GOBIN="${GOBIN}" ${GO_CMD} install "$1"
+}
+
+_install_kustomize() {
+	_install_tool sigs.k8s.io/kustomize/kustomize/v4@v4.5.2
+}
+
+_install_controller_gen() {
+	_install_tool sigs.k8s.io/controller-tools/cmd/controller-gen@v0.6.2
+}
+
+_install_revive() {
+	_install_tool github.com/mgechev/revive@v1.2.3
+}
+
+_install_golangci_lint() {
+	_install_tool github.com/golangci/golangci-lint/cmd/golangci-lint@v1.46.2
+}
+
+_install_yq() {
+	_install_tool github.com/mikefarah/yq/v4@v4.23.1
+}
+
+_install_gosec() {
+	_install_tool github.com/securego/gosec/v2/cmd/gosec@v2.13.1
 }
 
 _install_gitlint() {
-    _require_py
-    _ensure_alt_bin
-    "${PY_CMD}" -m venv "${ALT_BIN}/.py"
-    "${ALT_BIN}/.py/bin/pip" install "gitlint==${GITLINT_VER}"
-    installed_to="${ALT_BIN}/gitlint"
-    ln -s "${ALT_BIN}/.py/bin/gitlint" "${installed_to}"
+	_require_gobin
+	_require_py
+	"${PY_CMD}" -m venv "${GOBIN}/.py"
+	"${GOBIN}/.py/bin/pip" install "gitlint==0.19.1"
+	ln -s "${GOBIN}/.py/bin/gitlint"  "${GOBIN}/gitlint"
 }
 
-_install_shellcheck() {
-    installed_to="${ALT_BIN}/shellcheck"
-    local url="https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VER}/shellcheck-${SHELLCHECK_VER}.linux.x86_64.tar.xz"
-    tmpdir="$(mktemp -d)"
-    _ensure_alt_bin
-    curl -Lo "${tmpdir}/shellcheck.tar.xz" "$url"
-    mkdir "${tmpdir}/shellcheck"
-    tar -xf "${tmpdir}/shellcheck.tar.xz" -C "${tmpdir}/shellcheck"
-    mkdir -p ~/bin
-    install -m0755 "${tmpdir}/shellcheck/shellcheck-${SHELLCHECK_VER}/shellcheck" "${installed_to}"
-    rm -rf "${tmpdir}"
-}
+GOBIN="${GOBIN:-${GOPATH}/bin}"
 
-
-GITLINT_VER="0.19.1"
-SHELLCHECK_VER="v0.8.0"
-
-
+if [ -z "$GO_CMD" ]; then
+    if ! GO_CMD="$(command -v go)"; then
+        echo "warning: failed to find go command" >&2
+    fi
+fi
 if [ -z "$PY_CMD" ]; then
     if ! PY_CMD="$(command -v python3)"; then
         echo "warning: failed to find python3 command" >&2
     fi
 fi
 
-ALT_BIN="$(realpath "${2:-.bin}")"
 case "$1" in
-    --gitlint)
-        if command -v "${ALT_BIN}/gitlint" 2>/dev/null; then
-            exit 0
-        fi
-        _install_gitlint 1>&2
-        echo "${installed_to}"
-    ;;
-    --shellcheck)
-        if command -v "${ALT_BIN}/shellcheck" 2>/dev/null; then
-            exit 0
-        fi
-        _install_shellcheck 1>&2
-        echo "${installed_to}"
-    ;;
-    *)
-        echo "usage: $0 --<tool-name> [<ALT_BIN>]"
-        echo ""
-        echo "available tools:"
-        echo "  --gitlint"
-        echo "  --shellcheck"
-    ;;
+	--kustomize)
+		_require_gobin
+		_install_kustomize
+		;;
+	--controller-gen)
+		_require_gobin
+		_install_controller_gen
+		;;
+	--revive)
+		_require_gobin
+		_install_revive
+		;;
+	--golangci-lint)
+		_require_gobin
+		_install_golangci_lint
+		;;
+	--yq)
+		_require_gobin
+		_install_yq
+		;;
+	--gosec)
+		_require_gobin
+		_install_gosec
+		;;
+	--gitlint)
+		_install_gitlint
+		;;
+	*)
+		echo "usage: GOBIN=<dir> $0 --<tool-name>"
+		echo ""
+		echo "available tools:"
+		echo "  --kustomize"
+		echo "  --controller-gen"
+		echo "  --revive"
+		echo "  --golangci-lint"
+		echo "  --yq"
+		echo "  --gosec"
+		echo "  --gitlint"
+		;;
 esac
