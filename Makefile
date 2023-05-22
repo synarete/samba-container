@@ -1,7 +1,8 @@
 SELF = $(lastword $(MAKEFILE_LIST))
 ROOT_DIR = $(realpath $(dir $(SELF)))
 
-
+GO_CMD=go
+ALT_BIN=$(CURDIR)/.bin
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell $(GO_CMD) env GOBIN))
@@ -13,8 +14,8 @@ endif
 # Get current GOARCH
 GOARCH?=$(shell $(GO_CMD) env GOARCH)
 
-# Local (alternative) GOBIN for auxiliary build tools
-GOBIN_ALT:=$(CURDIR)/.bin
+# Local (alternative) dir for auxiliary build tools
+ALT_BIN=$(CURDIR)/.bin
 
 CONTAINER_CMD ?=
 ifeq ($(CONTAINER_CMD),)
@@ -42,16 +43,14 @@ endef
 
 
 define installtool
-	@GOBIN=$(ALT_BIN) GO_CMD=$(GO_CMD) $(CURDIR)/hack/install-tools.sh $(1)
+	GOBIN=$(ALT_BIN) GO_CMD=$(GO_CMD) $(CURDIR)/hack/install-tools.sh $(1)
 endef
 
-GO_CMD=go
 BUILD_CMD:=$(CONTAINER_CMD) build $(BUILD_OPTS)
 PUSH_CMD:=$(CONTAINER_CMD) push $(PUSH_OPTS)
 SHELLCHECK:=shellcheck
 YAMLLINT_CMD=yamllint
 
-ALT_BIN=$(CURDIR)/.bin
 SHELLCHECK=$(shell command -v shellcheck || echo $(ALT_BIN)/shellcheck)
 GITLINT=$(shell command -v gitlint || echo $(ALT_BIN)/gitlint)
 
@@ -165,12 +164,12 @@ debug-vars:
 
 yq:
 ifeq (, $(shell command -v yq ;))
-	@echo "yq not found in PATH, checking $(GOBIN_ALT)"
-ifeq (, $(shell command -v $(GOBIN_ALT)/yq ;))
+	@echo "yq not found in PATH, checking $(ALT_BIN)"
+ifeq (, $(shell command -v $(ALT_BIN)/yq ;))
 	@$(call installtool, --yq)
-	@echo "yq installed in $(GOBIN_ALT)"
+	@echo "yq installed in $(ALT_BIN)"
 endif
-YQ=$(GOBIN_ALT)/yq
+YQ=$(ALT_BIN)/yq
 else
 YQ=$(shell command -v yq ;)
 endif
@@ -323,7 +322,7 @@ check-shell-scripts: $(filter $(ALT_BIN)%,$(SHELLCHECK))
 # not included in check to not disrupt wip branches
 check-gitlint: gitlint $(filter $(ALT_BIN)%,$(GITLINT))
 	$(GITLINT) -C .gitlint --commits origin/master.. lint
-.PHONY: check-gitlint 
+.PHONY: check-gitlint
 
 ### Mics. Rules ###
 
@@ -359,7 +358,8 @@ $(DIR)/.common: $(COMMON_DIR)
 	cp -r $(COMMON_DIR) $(DIR)/.common
 
 $(ALT_BIN)/%:
-	$(CURDIR)/hack/install-tools.sh --$* $(ALT_BIN)
+	GOBIN=$(ALT_BIN) GO_CMD=$(GO_CMD) \
+		$(CURDIR)/hack/install-tools.sh --$* $(ALT_BIN)
 
 clean-altbin:
 	$(RM) -r $(ALT_BIN)
