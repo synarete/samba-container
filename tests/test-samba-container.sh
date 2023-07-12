@@ -1,8 +1,14 @@
 #!/bin/bash
+export LC_ALL=C
+unset CDPATH
+
+SELF=$(basename "${BASH_SOURCE[0]}")
+msg() { echo "${SELF}: $*" >&2; }
+die() { msg "$*"; exit 1; }
+try() { ( "$@" ) || die "failed: $*"; }
 
 
-
-echo "determining container command."
+msg "Determining container command"
 if [ -z "${CONTAINER_CMD}" ]; then
 	CONTAINER_CMD=$(command -v docker || echo )
 fi
@@ -10,65 +16,32 @@ if [ -z "${CONTAINER_CMD}" ]; then
 	CONTAINER_CMD=$(command -v podman || echo )
 fi
 if [ -z "${CONTAINER_CMD}" ]; then
-echo "Error determining container command."
-exit 1
+	die "Failed to determine container command"
 fi
-echo "container command: '${CONTAINER_CMD}'."
-echo "creating temporary directory."
+msg "Container command: '${CONTAINER_CMD}'"
+
+
+msg "Creating temporary directory"
 TMPDIR="$(mktemp -d)"
-rc=$?
-
-if [ $rc -ne 0 ]; then
-	echo "Error creating temporary directory."
-	exit 1
-fi
-	echo "temporary directory: '${TMPDIR}'"
-	echo "starting Samba container."
-	CONTAINER_ID="$(${CONTAINER_CMD} run --network=none --name samba \
-		--volume="${TMPDIR}":/share:Z --rm  -d "${LOCAL_TAG}")"
-	rc=$?
-
-	if [ $rc -ne 0 ]; then
-		echo "Error running samba container"
-		exit 1
-	fi
-	echo "Container started, ID: '${CONTAINER_ID}'"
-
-	# give samba a second to come up
-	sleep 1
-
-	echo "Listing samba shares"
-		${CONTAINER_CMD} exec "${CONTAINER_ID}" smbclient -U% -L 127.0.0.1
-		rc=$?
-
-		if [ ${rc} -ne 0 ]; then
-			echo "Error listing samba shares"
-			exit 1
-		fi
+try stat "${TMPDIR}" > /dev/null
+on_exit() { [[ -d "${TMPDIR}" ]] && rm -rf "${TMPDIR}"; }
+trap on_exit EXIT
+msg "Temporary directory: '${TMPDIR}'"
 
 
-echo "stopping samba container."
-
-	${CONTAINER_CMD} kill "${CONTAINER_ID}"
-rc=$?
-
-if [ $rc -ne 0 ]; then
-	echo "Error stopping samba container"
-	exit 1
-fi
-
-echo "samba container stopped."
+msg "Starting samba container"
+CONTAINER_ID="$(${CONTAINER_CMD} run --network=none --name samba \
+	--volume="${TMPDIR}":/share:Z --rm  -d "${LOCAL_TAG}")"
+sleep 1 # give samba a second to come up
+try "${CONTAINER_CMD}" container exists "${CONTAINER_ID}"
+msg "Container started: '${CONTAINER_ID}'"
 
 
+msg "Listing samba shares"
+try "${CONTAINER_CMD}" exec "${CONTAINER_ID}" smbclient -U% -L 127.0.0.1
 
 
-echo "removing temporary directory."
-rm -rf "${TMPDIR}"
-rc=$?
+msg "Stopping samba container"
+try "${CONTAINER_CMD}" kill "${CONTAINER_ID}"
+msg "Samba container stopped"
 
-
-if [ $rc -eq 0 ]; then
-	echo "Success"
-fi
-
-exit $rc
